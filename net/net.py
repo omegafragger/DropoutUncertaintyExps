@@ -161,7 +161,7 @@ class net:
             if i == 0:
                 prediction = model.predict(X_test, batch_size=500, verbose=verbose)
             else:
-                prediction = np.concatenate((prediction, model.predict(X_test, batch_size=500, verbose=1)), axis=1)
+                prediction = np.concatenate((prediction, model.predict(X_test, batch_size=500, verbose=verbose)), axis=1)
             i += 1
 
-        return np.mean(prediction, axis=1)
+        return np.expand_dims(np.mean(prediction, axis=1), axis=1)
