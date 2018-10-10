@@ -21,12 +21,14 @@ parser=argparse.ArgumentParser()
 parser.add_argument('--dir', '-d', required=True, help='Name of the UCI Dataset directory. Eg: bostonHousing')
 parser.add_argument('--epochx','-e', default=500, type=int, help='Multiplier for the number of epochs for training.')
 parser.add_argument('--hidden', '-nh', default=2, type=int, help='Number of hidden layers for the neural net')
+parser.add_argument('--ensemble', '-en', default=10, type=int, help='Number of networks in the ensemble')
 
 args=parser.parse_args()
 
 data_directory = args.dir
 epochs_multiplier = args.epochx
 num_hidden_layers = args.hidden
+num_nets_in_ensemble = args.ensemble
 
 sys.path.append('net/')
 
@@ -155,7 +157,7 @@ for split in range(int(n_splits)):
             print ('Grid search step: Tau: ' + str(tau) + ' Dropout rate: ' + str(dropout_rate))
             network = net.net(X_train, y_train, ([ int(n_hidden) ] * num_hidden_layers),
                     normalize = True, n_epochs = int(n_epochs * epochs_multiplier), tau = tau,
-                    dropout = dropout_rate)
+                    dropout = dropout_rate, n_ensemble = num_nets_in_ensemble)
 
             # We obtain the test RMSE and the test ll from the validation sets
 
@@ -185,7 +187,7 @@ for split in range(int(n_splits)):
     # Storing test results
     best_network = net.net(X_train_original, y_train_original, ([ int(n_hidden) ] * num_hidden_layers),
                     normalize = True, n_epochs = int(n_epochs * epochs_multiplier), tau = best_tau,
-                    dropout = best_dropout)
+                    dropout = best_dropout, n_ensemble = num_nets_in_ensemble)
     error, MC_error, ll = best_network.predict(X_test, y_test)
     
     with open(_RESULTS_TEST_RMSE, "a") as myfile:

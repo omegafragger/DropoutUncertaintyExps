@@ -1,6 +1,7 @@
 # Copyright 2016, Yarin Gal, All rights reserved.
 # This code is based on the code by Jose Miguel Hernandez-Lobato used for his 
 # paper "Probabilistic Backpropagation for Scalable Learning of Bayesian Neural Networks".
+# The code contains an additional feature to train an ensemble of neural networks instead of just a single net.
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -21,10 +22,10 @@ import time
 class net:
 
     def __init__(self, X_train, y_train, n_hidden, n_epochs = 40,
-        normalize = False, tau = 1.0, dropout = 0.05):
+        normalize = False, tau = 1.0, dropout = 0.05, n_ensemble = 10):
 
         """
-            Constructor for the class implementing a Bayesian neural network
+            Constructor for the class implementing a Bayesian neural network ensemble
             trained with the probabilistic back propagation method.
 
             @param X_train      Matrix with the features for the training data.
@@ -43,6 +44,7 @@ class net:
             @param tau          Tau value used for regularization
             @param dropout      Dropout rate for all the dropout layers in the
                                 network.
+            @param n_ensemble   Number of networks in the ensemble
         """
 
         # We normalize the training data to have zero mean and unit standard
@@ -71,31 +73,35 @@ class net:
         lengthscale = 1e-2
         reg = lengthscale**2 * (1 - dropout) / (2. * N * tau)
 
-        inputs = Input(shape=(X_train.shape[1],))
-        inter = Dropout(dropout)(inputs, training=True)
-        inter = Dense(n_hidden[0], activation='relu', W_regularizer=l2(reg))(inter)
-        for i in range(len(n_hidden) - 1):
+        model_ensemble = []
+        for _ in range(n_ensemble):
+            inputs = Input(shape=(X_train.shape[1],))
+            inter = Dropout(dropout)(inputs, training=True)
+            inter = Dense(n_hidden[0], activation='relu', W_regularizer=l2(reg))(inter)
+            for i in range(len(n_hidden) - 1):
+                inter = Dropout(dropout)(inter, training=True)
+                inter = Dense(n_hidden[i+1], activation='relu', W_regularizer=l2(reg))(inter)
             inter = Dropout(dropout)(inter, training=True)
-            inter = Dense(n_hidden[i+1], activation='relu', W_regularizer=l2(reg))(inter)
-        inter = Dropout(dropout)(inter, training=True)
-        outputs = Dense(y_train_normalized.shape[1], W_regularizer=l2(reg))(inter)
-        model = Model(inputs, outputs)
+            outputs = Dense(y_train_normalized.shape[1], W_regularizer=l2(reg))(inter)
+            model = Model(inputs, outputs)
+            model.compile(loss='mean_squared_error', optimizer='adam')
 
-        model.compile(loss='mean_squared_error', optimizer='adam')
+            # We iterate the learning process
+            start_time = time.time()
+            model.fit(X_train, y_train_normalized, batch_size=batch_size, nb_epoch=n_epochs, verbose=0)
+            self.tau = tau
+            self.running_time = time.time() - start_time
+            model_ensemble.append(model)
 
-        # We iterate the learning process
-        start_time = time.time()
-        model.fit(X_train, y_train_normalized, batch_size=batch_size, nb_epoch=n_epochs, verbose=0)
-        self.model = model
-        self.tau = tau
-        self.running_time = time.time() - start_time
-
+        self.model_ensemble = model_ensemble
         # We are done!
+
+
 
     def predict(self, X_test, y_test):
 
         """
-            Function for making predictions with the Bayesian neural network.
+            Function for making predictions with the Bayesian neural network ensemble.
 
             @param X_test   The matrix of features for the test data
             
@@ -118,14 +124,13 @@ class net:
         # We compute the predictive mean and variance for the target variables
         # of the test data
 
-        model = self.model
-        standard_pred = model.predict(X_test, batch_size=500, verbose=1)
+        standard_pred = self.ensemble_predict(X_test, verbose=1)
         standard_pred = standard_pred * self.std_y_train + self.mean_y_train
         rmse_standard_pred = np.mean((y_test.squeeze() - standard_pred.squeeze())**2.)**0.5
 
         T = 10000
         
-        Yt_hat = np.array([model.predict(X_test, batch_size=500, verbose=0) for _ in range(T)])
+        Yt_hat = np.array([self.ensemble_predict(X_test) for _ in range(T)])
         Yt_hat = Yt_hat * self.std_y_train + self.mean_y_train
         MC_pred = np.mean(Yt_hat, 0)
         rmse = np.mean((y_test.squeeze() - MC_pred.squeeze())**2.)**0.5
@@ -137,3 +142,26 @@ class net:
 
         # We are done!
         return rmse_standard_pred, rmse, test_ll
+
+
+
+    def ensemble_predict(self, X_test, verbose=0):
+
+        """
+            Function for making a single prediction given the test input from the Bayesian network ensemble.
+
+            @param X_test The matrix of features for the test data. It is expected to be normalized
+            @param verbose Whether the prediction output should be verbose
+
+            @return mean prediction made by the ensemble
+        """
+
+        i = 0
+        for model in self.model_ensemble:
+            if i == 0:
+                prediction = model.predict(X_test, batch_size=500, verbose=verbose)
+            else:
+                prediction = np.concatenate((prediction, model.predict(X_test, batch_size=500, verbose=1)), axis=1)
+            i += 1
+
+        return np.mean(prediction, axis=1)
